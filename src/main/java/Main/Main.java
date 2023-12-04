@@ -18,6 +18,7 @@ import org.apache.http.protocol.UriHttpRequestHandlerMapper;
 import org.apache.http.util.EntityUtils;
 
 import java.io.*;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.stream.Collectors;
 
@@ -49,37 +50,41 @@ public class Main {
 
         @Override
         public void handle(HttpRequest request, HttpResponse response, HttpContext context)throws IOException{
-            {
-                String path = request.getRequestLine().getUri();
-                System.out.println("Request received\npath: " + path + "\n--------------------\n");
-            }
-
             switch(request.getRequestLine().getMethod()) {
                 case "POST": {
                     String responseBody = "";
-                    String requestBody = InputStreamToString(((HttpEntityEnclosingRequest) request).getEntity().getContent());
+                    String requestBody = EntityUtils.toString(((HttpEntityEnclosingRequest) request).getEntity());
                     int responseCode = 201;
-                    System.out.println(requestBody);
-                    try{
-                        Thread.sleep(500);
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
+                    System.out.println("Received request from server: " + requestBody);
+                    System.out.println("----------------------------");
+
+//                    try{
+//                        Thread.sleep(500);
+//                    } catch (InterruptedException e) {
+//                        throw new RuntimeException(e);
+//                    }
+
                     try{
                         ObjectMapper objectMapper = new ObjectMapper();
-                        var mp = objectMapper.readValue(requestBody, new TypeReference<HashMap<String, String>>() {});
-                        String pushSubscriptionId = mp.get("pushSubscriptionId");
-                        String verificationCode = mp.get("verificationCode");
-                       // System.out.println(pushSubscriptionId + " " + verificationCode);
-                        String FormattedRequestBody = FormatRequestBody(pushSubscriptionId, verificationCode);
-                        updatePushSubscription(JMAPServerURL, FormattedRequestBody);
-                        try{
-                            Thread.sleep(500);
-                        } catch (InterruptedException e) {
-                            throw new RuntimeException(e);
+                        var mp = objectMapper.readValue(requestBody, new TypeReference<HashMap<String, Object>>() {});
+                        String requestType = (String)mp.get("@type");
+                        System.out.println(mp.toString());
+                       // System.out.println(((ArrayList) mp.get("methodResponses")).get(0));
+
+                        if(requestType.equals("StateChange")){
+                            System.out.println("State Change notifications:");
+
+                        }
+                        else{
+                            String pushSubscriptionId = (String)mp.get("pushSubscriptionId");
+                            String verificationCode = (String)mp.get("verificationCode");
+                            // System.out.println(pushSubscriptionId + " " + verificationCode);
+                            String FormattedRequestBody = FormatRequestBody(pushSubscriptionId, verificationCode);
+                            updatePushSubscription(JMAPServerURL, FormattedRequestBody);
                         }
                     }
                     catch (Exception e){
+                        //System.out.println("error converting to json");
                         e.printStackTrace();
                         responseCode = HttpStatus.SC_UNPROCESSABLE_ENTITY;
                     }
@@ -107,7 +112,7 @@ public class Main {
                 {
                     HttpEntity entity = response.getEntity();
                     String responseString = EntityUtils.toString(entity, "UTF-8");
-                    System.out.println(responseString);
+                    //System.out.println(responseString);
                 }
 
                 int statusCode = response.getStatusLine().getStatusCode();
@@ -116,7 +121,7 @@ public class Main {
                 }
             }
             catch (Exception e){
-                System.out.println("Error connecting to server\n");
+                //System.out.println("Error connecting to server\n");
 
                 e.printStackTrace();
             }
@@ -175,14 +180,5 @@ public class Main {
         }
     }
 
-    private static String InputStreamToString(InputStream is){
-        try(BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(is))){
-            return bufferedReader.lines().collect(Collectors.joining(System.lineSeparator()));
-        }
-        catch (Exception e){
-            e.printStackTrace();
-            return "";
-        }
-    }
 
 }
