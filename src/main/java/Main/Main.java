@@ -1,37 +1,40 @@
 package Main;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.http.HttpEntityEnclosingRequest;
-import org.apache.http.HttpRequest;
-import org.apache.http.HttpResponse;
-import org.apache.http.HttpStatus;
+import org.apache.http.*;
+import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.bootstrap.HttpServer;
 import org.apache.http.impl.bootstrap.ServerBootstrap;
+import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.protocol.HttpContext;
 import org.apache.http.protocol.HttpRequestHandler;
 import org.apache.http.protocol.UriHttpRequestHandlerMapper;
+import org.apache.http.util.EntityUtils;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.util.HashMap;
 import java.util.stream.Collectors;
 
 public class Main {
+
+    private static final String JMAPServerURL = "http://localhost:80/jmap";
+    private static final int pushServerPort = 3333;
+
+    private static final String username = "testuser@mydomain";
+    private static final String password = "password";
+
     public static void main(String[] args) {
         try{
             UriHttpRequestHandlerMapper mapper = new UriHttpRequestHandlerMapper();
             mapper.register("/pushListener", new pushListener());
             HttpServer server = ServerBootstrap.bootstrap()
-                    .setListenerPort(3332)
+                    .setListenerPort(pushServerPort)
                     .setHandlerMapper(mapper).create();
 
             server.start();
@@ -55,15 +58,26 @@ public class Main {
                 case "POST": {
                     String responseBody = "";
                     String requestBody = InputStreamToString(((HttpEntityEnclosingRequest) request).getEntity().getContent());
-                    int responseCode = HttpStatus.SC_OK;
-                    //System.out.println(requestBody);
+                    int responseCode = 201;
+                    System.out.println(requestBody);
+                    try{
+                        Thread.sleep(500);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
                     try{
                         ObjectMapper objectMapper = new ObjectMapper();
                         var mp = objectMapper.readValue(requestBody, new TypeReference<HashMap<String, String>>() {});
                         String pushSubscriptionId = mp.get("pushSubscriptionId");
                         String verificationCode = mp.get("verificationCode");
                        // System.out.println(pushSubscriptionId + " " + verificationCode);
-                        updatePushSubscription(pushSubscriptionId, verificationCode);
+                        String FormattedRequestBody = FormatRequestBody(pushSubscriptionId, verificationCode);
+                        updatePushSubscription(JMAPServerURL, FormattedRequestBody);
+                        try{
+                            Thread.sleep(500);
+                        } catch (InterruptedException e) {
+                            throw new RuntimeException(e);
+                        }
                     }
                     catch (Exception e){
                         e.printStackTrace();
@@ -79,6 +93,35 @@ public class Main {
                     response.setStatusCode(HttpStatus.SC_METHOD_NOT_ALLOWED);
             }
         }
+
+
+        private static void updatePushSubscription(String url, String requestBody) throws Exception{
+
+            try(DefaultHttpClient httpClient = new DefaultHttpClient()){
+                HttpPost postRequest = new HttpPost(url);
+                postRequest.addHeader("Content-Type", "application/json; charset=utf-8");
+                postRequest.addHeader("Authorization", "Basic dGVzdHVzZXJAbXlkb21haW46cGFzc3dvcmQ=");
+                postRequest.setEntity(new StringEntity(requestBody));
+                HttpResponse response = httpClient.execute(postRequest);
+
+                {
+                    HttpEntity entity = response.getEntity();
+                    String responseString = EntityUtils.toString(entity, "UTF-8");
+                    System.out.println(responseString);
+                }
+
+                int statusCode = response.getStatusLine().getStatusCode();
+                if(statusCode != 200){
+                    throw new RuntimeException("Failed with HTTP error code: " + statusCode);
+                }
+            }
+            catch (Exception e){
+                System.out.println("Error connecting to server\n");
+
+                e.printStackTrace();
+            }
+        }
+
         /*
         {
               "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
@@ -93,7 +136,8 @@ public class Main {
               ]
             }
          */
-        private static void updatePushSubscription(String pushSubscriptionId, String verificationCode)throws Exception{
+
+        private static String FormatRequestBody(String pushSubscriptionId, String verificationCode)throws Exception{
             ObjectMapper mapper = new ObjectMapper();
             JsonNode root = mapper.createObjectNode();
 
@@ -127,9 +171,7 @@ public class Main {
             ((ObjectNode)root).set("using",usingArrayNode);
             ((ObjectNode)root).set("methodCalls",methodCallsArrayNode);
 
-            String json = null;
-            json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
-            System.out.println(json);
+            return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
         }
     }
 
